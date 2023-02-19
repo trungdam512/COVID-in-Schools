@@ -1,0 +1,878 @@
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse)
+library(lubridate)
+library(readr)
+library(stringr)
+library(maps)          
+library(ggmap)         
+library(gplots)        
+library(RColorBrewer)  
+library(sf)            
+library(leaflet)       
+library(ggthemes)      
+library(usmap)
+library(rvest) 
+library(reshape2)
+library(dplyr)
+library(tibble)
+library(knitr)
+library(usdata)
+options(htmltools.dir.version = FALSE, warning = FALSE, message = FALSE)
+
+```
+
+## P1: Names and Workflow
+Names: Aidan Appel, Trung Dam, Ethan Hyslop, Andie Walker, and Jojo Zhang.
+
+Workflow: We will work by setting goals for individuals to finish, like creating specific visualizations, and then coming together during group meetings to check in with everyone and combine the code into a common document. We will also agree on a set of common variable names to use so that we can write code separately but combine it easily in the future. We plan to meet once a week, most likely more as the deadline approaches and we have a better understanding of what needs to be done. 
+
+## P2: Research Questions
+* Q1: How does the Size of School Enrollment affect the COVID-19 Case Rate?
+* Q2: What is the Relationship Between School COVID Case Rate and County COVID Case Rate?
+* Q3: What is the Relationship Between School COVID Case Rates and Surrounding Political Leanings?
+
+
+
+
+## P3: References
+
+Foundational School COVID data
+College COVID cases
+https://github.com/nytimes/covid-19-data/blob/master/colleges/colleges.csv
+This data set is from the Ny Times, and it measures cases of covid. It also shows the name of the college, and location (county & city & state). It is limited because it does not show the total number of students in the college, or how big the surrounding area of the college is. It has 1949 different colleges from the US states and territories. This data can be joined with data about population and cases from the area the college is, and how big each college is.
+
+General COVID data
+United States COVID-19 Cases and Deaths by State over Time | Data | Centers for Disease Control and Prevention (cdc.gov)
+This data set is from the CDC, and it measures cases of Covid across each state. This data shows the total number of cases in each state, and the total amount of new cases in each state along with the day of data entry. This data set has 39,900 entries going from 01/22/2020 to 11/16/2021. The hardest part about this data set will be to filter it to the time frame we want, and to have only data relevant to the visualizations.  
+
+College Information
+College Scorecard
+https://data.ed.gov/dataset/college-scorecard-all-data-files-through-6-2020/resources
+This data from the US Department of Education has a lot of helpful information we can use for our project, especially for spatial visualizations, including the city, zipcode, latitude and longitude. It also has additional information about the types of degrees offered and student outcomes. This dataset covers over 3500 colleges and universities from 1996-97 through 2019-2020. We can join this data with the other datasets through the IPEDS id number, which is also present in the IPEDS datasets and the New York Times dataset. Because of the sheer amount of information that this dataset keeps track of for each school, it will be a challenge to filter only the variables that we need.
+
+IPEDS
+https://nces.ed.gov/ipeds/use-the-data
+We can also use data from the Integrated Postsecondary Education Data System, which has lots of information tied to institutions of higher education. We will use this data to get information like the size and location of the school, which we can join with the NY Times data using the IPEDS identifying number. The hardest part about this data is that it has a huge amount of information, so we will have to make sure we are only getting what we need. 
+
+Political Leanings
+Data:
+https://github.com/TheUpshot/presidential-precinct-map-2020
+
+This data set is compiled by the New York Times for The Upshot, scraping 2020 presidential election results data from individual state results. It measures at a county-level the votes received by Joe Biden and those received by Donald Trump. It also includes pre-calculated measures of percentage and percentage difference. The data includes all desired variables, and is the most current national data available as the 2020 presidential election was the most recent comprehensively reported election. The final table is 10 variables by 3152 observations, representative of all counties in the US. We will join this data by county name with the College COVID Cases dataset, allowing for exploration of Research Question 3.
+
+
+### Code
+```{r}
+#Load political data in
+PoliticalCounties <- read.csv("2020_US_County_Level_Presidential_Results.csv")
+```
+
+```{r}
+# Clean political data
+PoliticalStatus <- PoliticalCounties %>%
+  group_by(state_name)%>%
+  summarise(TotalGop = sum(votes_gop), TotalDem = sum(votes_dem))%>%
+  mutate(Vote = ifelse(TotalGop>TotalDem,"Red","Blue"))%>%
+  summarise(state_name, Vote)
+```
+
+```{r}
+# Load the college enrollment data in
+CollegeEnrollment <- read.csv("collegesizes.csv")
+```
+
+```{r}
+# Clean the college data
+CollegeEnrollment <-
+  CollegeEnrollment[-c(1:4), ]
+
+CollegeEnrollment <- CollegeEnrollment %>%
+  rename(ipeds_id = National.Center.for.Education.Statistics)%>%
+  rename(Institution = X)%>%
+  rename(Enrollment = X.1)
+```
+
+```{r}
+
+ScoreCard <- read.csv("Scorecard.csv")
+
+```
+
+```{r}
+CDC <- read.csv("CDCData.csv")
+
+```
+
+```{r}
+
+CDCFiltered <- CDC %>%
+  mutate(Submission_date2=mdy(submission_date)) %>%
+  filter(Submission_date2 >= mdy("07-01-2020")) %>%
+  filter(Submission_date2 <= mdy("05/26/2021")) %>%
+  filter(state != "FSM" & state !=  "PW" & state !="RMI" & state != "AS" & state !="MP" & state !="PR")
+
+```
+
+```{r}
+StateCases <- CDCFiltered %>%
+  group_by(state)%>%
+  summarise(TotalCases = max(tot_cases))
+  
+
+```
+
+```{r}
+population <- read.csv("population.csv")
+
+```
+
+```{r}
+populationNew <- population%>%
+  filter(ages == "total")%>%
+  group_by(state.region)%>%
+  summarize(total.population = max(population))
+
+CasesPopulationAdjusted <- StateCases %>%
+    inner_join(populationNew, by=c("state"="state.region")) %>%
+    mutate(CasesPer100 = TotalCases/total.population*100)
+```
+
+
+```{r}
+CollegeCOVID <- read.csv("collegeCOVIDcases.csv")
+
+
+```
+
+
+```{r}
+
+CasesandPolitics <- CasesPopulationAdjusted %>%
+    inner_join(PoliticalStatus, by=c("state"="state_name"))
+
+```
+
+
+```{r}
+CompleteSet <- CollegeCOVID %>%
+  inner_join(CasesandPolitics)%>%
+  rename(TotalStateCases = TotalCases)%>%
+  rename(TotalStatePopulation = total.population)%>%
+  rename(StateCasesPer100 = CasesPer100)%>%
+  rename(State2020Vote = Vote)%>%
+  inner_join(CollegeEnrollment)%>%
+  select(-Institution)%>%
+  select(-notes)%>%
+  select(-cases_2021)
+  
+
+CompleteSet$Enrollment <- as.numeric(gsub(",","",CompleteSet$Enrollment))
+CompleteSet$Enrollment <- as.numeric(CompleteSet$Enrollment) 
+
+CompleteSet <- CompleteSet%>%
+    mutate(SchoolCasesPer100 = cases/Enrollment*100)
+
+
+
+
+```
+
+
+```{r}
+collegesize <- read_csv("CollegeSizes.csv")
+colleges <- read_csv("collegeCOVIDcases.csv")
+```
+
+```{r}
+Sizes <- collegesize %>% 
+  rename(`ipeds_id`=`National Center for Education Statistics`) 
+  
+
+```
+
+```{r}
+
+Number_size <- colleges %>% 
+  transform(ipeds_id = as.numeric(ipeds_id))
+
+```
+
+```{r}
+Allsize <- Number_size %>% 
+    inner_join(Sizes,by=c("ipeds_id")) %>% 
+    rename(`Enrollment`=`...3`) 
+
+
+```
+
+```{r}
+  Allsize$Enrollment<-gsub(",","",Allsize$Enrollment) 
+
+```
+
+
+```{r}
+colleges <- read_csv("collegeCOVIDcases.csv")
+CollegeSizes <- read_csv("CollegeSizes.csv", 
+    col_names = FALSE, skip = 5)
+Scorecard <- read_csv("Scorecard.csv")
+
+```
+
+```{r}
+colleges_sizes<-
+  colleges %>% 
+  mutate(ipeds_id = as.numeric(ipeds_id)) %>% 
+  inner_join(CollegeSizes,
+            by = c("ipeds_id" = "X1"))
+
+colleges_sizes$X3 = str_replace_all( colleges_sizes$X3, ",", "")
+
+colleges_sizes <- 
+  colleges_sizes %>% 
+  mutate(enrollment = as.numeric(X3), case_rate = cases/as.numeric(X3)) %>% 
+  select(state, county, city, ipeds_id, college, cases, cases_2021, enrollment, case_rate)
+  
+```
+
+
+```{r}
+cases_by_size <-
+  colleges_sizes %>% 
+  mutate(interval = cut(enrollment, 
+                        c(0,5000,10000,25000,50000,100000), labels = FALSE))%>%
+  mutate(interval = fct_recode(factor(interval),
+                              "0-5000" = "1",
+                              "5001-10000" = "2", 
+                              "10001-25000" ="3",
+                              "25001-50000" = "4", 
+                              "50001-100000" = "5")) %>%
+  filter(enrollment < 93349 | case_rate > 1)
+```
+
+
+```{r}
+CDC <- read_csv("CDCData.csv")
+```
+
+```{r}
+CDCFiltered2 <-
+  CDC %>%
+  mutate(Submission_date2=mdy(submission_date)) %>%
+  filter(Submission_date2 >= mdy("07-01-2020")) %>%
+  filter(Submission_date2 <= mdy("05/26/2021")) %>%
+  filter(state != "FSM" & state !=  "PW" & state !="RMI" & state != "AS" & state !="MP" & state !="PR") 
+CDCFilteredVis <-
+  CDCFiltered2 %>%
+  filter(new_case >= 0) 
+```
+
+```{r}
+library(dplyr)
+CDCFilteredVis <-
+  CDCFilteredVis %>%
+  mutate(week = cut.Date(Submission_date2, breaks = "1 week", labels = FALSE)) 
+```
+
+
+```{r}
+Colleges <- read_html("https://github.com/nytimes/covid-19-data/blob/master/colleges/colleges.csv")
+```
+
+```{r}
+CollegeDate <- 
+  Colleges %>%
+  html_nodes(".js-file-line :nth-child(2)") %>%
+  html_text()
+head(CollegeDate)
+```
+
+```{r}
+CollegeState <-
+  Colleges %>%
+  html_nodes(".js-file-line :nth-child(3)") %>%
+  html_text()
+```
+
+```{r}
+CollegeCounty <-
+  Colleges %>%
+  html_nodes(".js-file-line :nth-child(4)") %>%
+  html_text()
+```
+
+```{r}
+CollegeCity <-
+  Colleges %>%
+  html_nodes(".js-file-line :nth-child(5)") %>%
+  html_text()
+```
+
+```{r}
+CollegeName <-
+  Colleges %>%
+  html_nodes(".js-file-line :nth-child(7)") %>%
+  html_text()
+```
+
+```{r}
+College2020Cases <-
+  Colleges %>%
+  html_nodes(".js-file-line :nth-child(8)") %>%
+  html_text()
+```
+
+```{r}
+College2021Cases <-
+  Colleges %>%
+  html_nodes(".js-file-line :nth-child(9)") %>%
+  html_text()
+```
+
+
+```{r}
+College_Data <- tibble(date=CollegeDate, state=CollegeState, city=CollegeCity, county=CollegeCounty, name=CollegeName, cases2020=College2020Cases, cases2021=College2021Cases) 
+```
+
+```{r}
+College_Data <-
+  College_Data %>%
+  filter(name != "college") %>%
+  mutate(res_county=county) 
+College_Data$res_county <- str_to_lower(College_Data$res_county)
+```
+
+
+```{r}
+College_Data$cases2020 <- as.numeric(College_Data$cases2020)
+```
+
+
+```{r}
+Schools_to_Show <-
+  College_Data %>%
+  filter( state == "minnesota") %>%
+  filter(cases2020 > 10)
+
+```
+```{r}
+CountyPop <- read_csv("CountyPopCsv.csv")
+CountyPopClean <- 
+  CountyPop %>%
+  mutate(county=`table with row headers in column A and column headers in rows 3 through 4 (leading dots indicate sub-parts)`) %>%
+  select(13,county) 
+CountyPopClean$county <- str_to_lower(CountyPopClean$county)
+CountyPopClean <-
+  CountyPopClean 
+```
+
+
+```{r}
+College_Data$state <- str_to_lower(College_Data$state)
+CountyPopClean$location<-paste(CountyPopClean$county)
+CountyPopClean$county<-str_replace(CountyPopClean$county, ".", "")
+CountyPopClean$county <-sapply(strsplit(CountyPopClean$county, ","), "[", 1) 
+CountyPopClean$county <- str_replace(CountyPopClean$county, " county", "")
+CountyPopClean$location<-str_replace(CountyPopClean$location, ".", "")
+```
+
+```{r}
+College_Data$location <- paste(College_Data$res_county, College_Data$state, sep= " county, ")
+```
+
+
+```{r}
+CountyDataAndColleges <-
+  CountyPopClean %>%
+  mutate(res_county=county) %>%
+  select(...13,res_county) %>%
+  filter(res_county %in% College_Data$res_county) %>%
+  left_join(College_Data) %>%
+  mutate(County_Population=...13) %>%
+  mutate(case_total=cases2020) %>%
+  select(County_Population, res_county,state,city,name,case_total) 
+
+  CountyDataAndColleges$case_total <- as.numeric(CountyDataAndColleges$case_total)
+```
+```{r}
+LocationCode <-
+  College_Data %>%
+  select(state,city,name,cases2020,res_county,location) %>%
+  left_join(CountyPopClean, "location"="location") %>%
+  mutate(County_Population=...13) 
+LocationCode$cases2020 <- as.numeric(LocationCode$cases2020)
+```
+```{r}
+Cases_College_County <-
+  LocationCode %>%
+  filter(cases2020>1) 
+```
+
+```{r}
+CollegeScoreCard <- read.csv("ScoreCard.csv")
+CountyCovid <-read.csv("countycovid.csv")
+```
+
+```{r}
+ClassSize <-
+  CollegeScoreCard %>%
+  select(UGDS, INSTNM) %>%
+  mutate(name=INSTNM) 
+```
+
+```{r}
+ClassSize[795,3] <- "Indiana University Bloomington"
+ClassSize[1274,3]<- "Minnesota State University, Mankato"
+ClassSize[1301,3] <-"St. Olaf College"
+
+```
+
+```{r}
+CountyCovid$county<- str_to_lower(CountyCovid$county)
+```
+
+
+```{r}
+MNCounties <-
+  Cases_College_County %>%
+  filter(state== "minnesota") %>%
+  mutate(CountyPopulation= ...13) %>%
+  mutate(cases=cases2020) %>%
+  select(state,city,name,cases,county,CountyPopulation)
+MnCountyCovid <-
+  CountyCovid %>%
+  filter(state == "Minnesota") %>%
+  select(county,X5.26.2021)
+RiceCounty <-
+  MNCounties %>%
+  left_join(MnCountyCovid) %>%
+  filter(county== "rice" |
+           county=="blue earth"| 
+           county=="winona" |
+           county=="otter tail" |
+           county=="clay" |
+           county=="crow wing") %>%
+  mutate(CountyCaseRate= X5.26.2021/CountyPopulation) %>%
+  left_join(ClassSize) %>%
+  mutate(CollegeCaseRate=cases/UGDS)
+```
+
+```{r}
+Viz5 <-
+  RiceCounty %>%
+  filter(county=="rice" | county=="winona") 
+```
+
+```{r}
+rice_line <- 0.12158813
+winona_line <-0.09088028
+```
+
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(rvest)
+countycode <- read_html("https://www.nrcs.usda.gov/wps/portal/nrcs/detail/national/home/?cid=nrcs143_013697")
+
+number <- countycode %>% html_nodes("#detail tr :nth-child(1)") %>% html_text() 
+countyname <- countycode %>% html_nodes("#detail tr :nth-child(2)") %>% html_text()
+state <- countycode %>% html_nodes("#detail tr :nth-child(3)") %>% html_text()
+
+countycode <- tibble(FIPS=number, county=countyname, state=state)
+countycode <- countycode %>% filter(FIPS!="FIPS",county != "Name", state != "State")
+
+CDC <- read_csv("CDCData.csv")
+CDCFiltered <-
+  CDC %>%
+  mutate(Submission_date2=mdy(submission_date)) %>%
+  filter(Submission_date2 >= mdy("07-01-2020")) %>%
+  filter(Submission_date2 <= mdy("05/26/2021")) %>%
+  filter(state != "FSM" & state !=  "PW" & state !="RMI" & state != "AS" & state !="MP" & state !="PR")
+
+colleges <- read_csv("colleges.csv")
+PoliticalCounties <- read.csv("2020_US_County_Level_Presidential_Results.csv")
+collegesize <- read_csv("CollegeSizes.csv") 
+scorecard <- read_csv("Scorecard.csv")
+countysize <- read_csv("counties.csv") %>% select(`FIPS Code`, County, State, Population)
+countycovid <- read_csv("countycovid.csv") %>% filter(state != "District of Columbia")
+#Clean the column for later joining phase
+countysize$`FIPS Code`<- sub("^0+","",countysize$`FIPS Code`)
+
+
+
+```
+```{r}
+#Clean up the table for joining phase
+colleges$ipeds_id<- as.numeric(as.character(colleges$ipeds_id))
+collegesize$...3<- gsub(",","", collegesize$...3)
+collegesize$...3 <- as.numeric(as.character(collegesize$...3))
+
+college1 <- collegesize %>% left_join(colleges, by= c("National Center for Education Statistics"="ipeds_id")) %>% filter(college != "NA") %>% select(`National Center for Education Statistics`, state, county, college, cases, ...3) %>% mutate(caserate = cases/...3)
+
+
+countycovid <- rename(countycovid, case= `5/26/2021`)
+county1 <- countycovid %>% left_join(countysize, by= c("fips"="FIPS Code")) %>% select(fips,state, county,case, Population) %>% mutate(case_rate = case/Population) %>% filter(case_rate < 1)
+
+
+```
+```{r}
+#Fixing some problem with abbreviated state name in county code table
+library(usdata)
+countycode$state <- state.name[match(countycode$state, state.abb)]
+college2 <- college1 %>% left_join(countycode, by=c("county"="county", "state"="state"))
+collegevscounty <- county1 %>% left_join(college2, by=c("county"="county", "state"="state")) %>% filter(college!="NA") %>% 
+  select(fips, state,county, case_rate,college, caserate)
+
+collegevscounty1 <- collegevscounty %>% 
+  group_by(state, county) %>% 
+  mutate(collegecase_rate= mean(caserate)) %>% 
+  select(state, county, case_rate, college, caserate, collegecase_rate)%>% 
+  arrange(desc(case_rate))
+
+collegevscounty2 <- collegevscounty1 %>% select(state, county, case_rate, collegecase_rate) %>% 
+  pivot_longer(cols = case_rate:collegecase_rate, names_to = "Types", values_to ="Rate") %>% 
+  head(n=164)
+
+
+```
+
+## P4: Visualizations
+
+### Research Question 1: What is the Relationship Between School Size and School COVID Case Rate?
+
+Because colleges host large numbers of people living and learning together in the same concentrated area, they create opportunities for COVID-19 hotspots to arise. However, the community created by a small college is different than that created by a much larger college. For our first research question, we wanted to explore how the COVID-19 case rates at various schools differed based on the number of students enrolled. For these visualizations, we excluded the three schools with the largest enrollments, as they were all for-profit, mostly online schools and had tens of thousands of students that threw off the rest of the graphs. 
+
+
+#### Visualization 1:
+```{r}
+size_summary<-
+  cases_by_size %>% 
+  group_by(interval) %>% 
+  summarize(mean_cases = mean(cases),
+            mean_case_rate = mean(case_rate),
+            total_schools = n(),
+            total_students = sum(enrollment))
+
+
+ggplot(size_summary, aes(x = interval, y = mean_case_rate)) +
+  geom_col(fill = "blue") +
+  labs(x = "Size of School by Students Enrolled",
+       y = "Average Covid Case Rate", title="Average COVID Cases Rate by School Size")
+
+```
+
+This visualization plots the average COVID-19 case rate by size category for schools, starting with 0-5000 students and going up to 50,000+ students. The smallest school category has a case rate close to the rate for schools with 25000-50000 students, but the rate drops with the next category before increasing steadily.
+
+
+#### Visualization 2:
+```{r}
+
+ggplot(size_summary, aes(x = interval, y = total_schools)) +
+  geom_col(fill = "blue") +
+  labs(x = "Number of Students Enrolled",
+       y = "Number of Schools", title="Number of Schools in each Size Category")
+
+
+```
+
+This visualization shows the number of schools in each category, to help explain the proportion of schools with each number of students. The majority of schools in our dataset enroll under 5000 students, however there are still significant numbers of schools that enroll tens of thousands of students. 
+
+
+
+#### Visualization 3:
+```{r}
+ggplot(size_summary, aes(x = interval, y = total_students)) +
+  geom_col(fill = "blue") +
+  labs(x = "Size of School by Students Enrolled",
+       y = "Total Number of Students", title="Number of Students in each Size Category") +
+  scale_y_continuous(labels = function(x) format(x, scientific = FALSE))
+
+```
+
+This next visualization shows the numbers of students who are represented by each category of school size. The fewest number of students attend very large schools (over 50000 students). Most students attend schools between 10000 and 50000 students, with a significant amount attending small schools or schools between 5000 and 10000 students. 
+
+
+
+#### Visualization 4
+```{r}
+Allsize <- Allsize %>% 
+  transform(Enrollment = as.numeric(Enrollment)) %>% 
+  mutate(percent=cases/Enrollment) %>% 
+  group_by(percent) %>% 
+  mutate(`percent(%)`=percent*100) %>% 
+  head(n=50)
+  
+ggplot(data = Allsize) +
+  geom_bar(aes(x = reorder(college,+Enrollment),
+               y = Enrollment,
+               fill = `percent(%)`),
+           stat = "identity",
+           position = position_dodge()) +
+  labs(x="School", title="Top 50 Schools by COVID Case Rate, Visualized By Enrollment")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size = 4))
+  
+
+```
+
+This graph depicts the 50 US colleges and universities with the highest enrollment. The schools are colored by COVID case rate. This larger-scale visualization further supports the findings of the previous three, by showing higher case rates among the smaller schools, lower case rates among schools in the middle, then higher case rates again among larger schools. This visualization reinforces the association we find in this section that COVID case rates vary with school population.
+
+#### Visualization 5
+
+```{r message=FALSE,warning=FALSE,fig.width=12}
+college_locations <- 
+  Scorecard %>% 
+  select(UNITID, LATITUDE, LONGITUDE)
+
+cases_by_size <- 
+  cases_by_size %>% 
+  inner_join(college_locations, 
+             by = c("ipeds_id" = "UNITID"))
+  
+
+us<- get_stamenmap(
+    bbox = c(left = -134, bottom = 20, right = -40, top = 53), 
+    maptype = "toner-lines",
+    zoom = 3)
+
+ggmap(us) + # creates the map "background"
+  geom_point(data = cases_by_size , 
+             aes(x = LONGITUDE, y = LATITUDE, size = cases, color = case_rate), 
+             alpha = .4) +
+  scale_colour_gradient2(low = "#fffa73",
+                         mid = "red",
+                         high = "#5c1470",
+                         midpoint = 0.3,
+                         space = "Lab",
+                         na.value = "grey50",
+                         guide = "colourbar",
+                         aesthetics = "colour") +
+  labs(title="Total Cases and Cases per Enrolled Student at Colleges and Universities Across the US")+
+  theme_map()
+```
+
+
+Finally, this visualization introduces geography, and shows the locations of all of the schools in the New York Times dataset, with the size of the points representing the number of cases and the color representing the case rate. This visualization illustrates how colleges are mainly located in the eastern half of the country. It looks like there are lower case rates in general on the West Coast, while there are schools with higher case numbers and rates across the South, parts of the Midwest, and the Northeast. In the future, adjusting the color scale might make this graph easier to read. 
+
+### Research Question 2: What is the Relationship Between School COVID Case Rate and County COVID Case Rate?
+
+While colleges operate largely as self-sustaining communities, they do so within the greater context of towns and cities across the US. In this section, we seek to understand the link between regional county-level COVID case rates and local school case rates. 
+
+
+
+#### Visualization 1
+```{r}
+ggplot(collegevscounty2, aes(x=county, y= Rate, fill= Types))+
+  geom_bar(position = "dodge", stat= "identity")+
+  theme(axis.text.x = element_text(angle=90))+
+  labs(title = "The Covid Case Rate in Top 50 Counties vs The Covid Case Rate in Respective College Institutions", x="County",y="Rate")+
+  scale_fill_discrete(name= "Legend", labels= c("County Covid Rate","Institution Covid Rate"))
+```
+
+This first visualization examines whether there is a trend between the prevalence of COVID in the county and the universities in that county. Subjects visualized are the 50 counties with the highest rates of covid infections and their college institutions' case rate. We notice a correlation in both graphs. Specifically, the covid infection rate of counties is often higher than colleges. That may suggest that usually the school's covid implementations work better than the counties' because of higher obedience in the smaller group of educated people. However, there are still some counties that have lower Covid case rates than the schools inside it. This might be because of the fact that those counties are fairly scattered and those institutions inside them are more dense in number, posing more potential chances of higher Covid transmission. Also, it is suggested that those schools might not pay enough attention to their Covid situations. Drawing from current visualizations, there is a need to examine what differentiates these counties and schools.
+
+
+
+#### Visualization 2:
+
+
+```{r}
+ggplot(RiceCounty, aes(x=reorder(name,CollegeCaseRate), y=CollegeCaseRate, fill=county)) +
+  geom_col(position="dodge")+
+  theme(axis.text.x = element_text(angle=90, size=5))+
+  labs(x="School", title="Top Ten Schools in Minnesota for College Case Rate")
+```
+
+This graph narrows the previous analysis, centering on the College Case Rates in MN counties with populations from 50,000 to 100,000. This graph shows that a college's case rate does not seem to correlate to county population. This further demonstrates the data showing that smaller colleges seem to have a higher case rate, as seen in Bethany Lutheran College and Minnesota State University-Mankato which both are in the blue earth county. However, Minnesota State University-Mankato has a population size of 11,675 while Bethany Lutheran has a population size of 600. Yet, Bethany Lutheran has a case rate of 17.6% as compared to Mankato with a case rate of 5.6%. This helps show that larger schools seem to do a better job at handling covid, suggesting that in-school factors may be more impactful than external forces.
+
+#### Visualization 3:
+
+```{r}
+ggplot(Viz5, aes(x=name, y=CollegeCaseRate,fill=county)) +
+  geom_col(aes(x=fct_reorder(name,CollegeCaseRate,.desc=TRUE), y=CollegeCaseRate)) +
+  theme(axis.text.x = element_text(angle=10)) +
+  ggtitle("      Case Rate of Colleges in mid size MN counties ") +
+  geom_hline(aes(yintercept=rice_line, color="blue")) +
+  geom_text((aes(2, rice_line-0.012, label = "Rice County Covid Rate" , vjust = - 1))) +
+  geom_hline(aes(yintercept=winona_line, color="red")) +
+  geom_text((aes(4, winona_line-0.012, label = "Winona County Covid Rate" , vjust = - 1)))+
+  xlab("College Name")+
+  guides(fill = guide_legend(override.aes = list(colour = NA)), 
+           colour = FALSE)
+  
+```
+
+This visualization narrows further, comparing the colleges in the counties of Rice and Winona, which both are in the mid size population range of 50,000-100,000. In contrast to the previous graph's findings, this graph has a surprising twist in which the colleges in Rice, the high county case rate, actually have lower college case rates then the counterpart of Winona colleges that have higher levels then the county case rate. These graphs show that in some cases there are other factors then just college size, which we must continue to explore during the next phase of data visualization, beginning with the next research question.
+
+
+
+#### Visualization 4
+
+```{r}
+#Find the covid case rate of Twin Cities
+county2 <- county1 %>% filter(county=="Ramsey"|county=="Hennepin") %>% 
+  mutate(TwinCitiesrate= sum(case)/sum(Population))
+
+collegevscounty7 <- collegevscounty %>% 
+  filter(county=="Ramsey"|county =="Hennepin")
+
+ggplot(collegevscounty7, aes(x=fct_reorder(college,caserate,.desc=TRUE), y=caserate,fill=county)) +
+  geom_bar(stat="identity")+
+  theme(axis.text.x = element_text(angle=45, hjust=1))+
+  geom_hline(aes(yintercept=0.09629579))+
+  geom_text(aes("Macalester College",0.09629579, label= "Twin Cities Covid Rate", vjust = -1))+
+  labs(title="Covid Rate of Twin Cities' College Institution", y="Rate",x="College")
+```
+
+Finally, we choose to dig deeper inside the community where we all live and study, the Twin Cities, to see if there is any difference between schools in the two big cities before summer 2021. When we first take a look at the graph, it clearly shows that the Covid rate of Ramsey county's College Institutions is higher than Hennepin county's, especially the rate of Bethel University and University of St. Thomas. These two institutions' implementation on covid precautions is pretty loose; specifically, wearing masks inside and outside the classroom is not mandatory. Also, students in those colleges, who are either fully vaccinated or partly vaccinated, do not have to wear masks in public. Being said, there would always be a higher possibility of cross infection in those schools, leading to the highest two institutions' Covid rate. Furthermore, this leads to two more questions: do religious schools have something to do with the higher rate of Covid inside its community?` and `What are the differences between Covid implementation steps of St. Paul and Minneapolis?` We may explore these further in the future. 
+
+This section has offered several visualizations of the relationship between school COVID case rate and County case rate. There are still several explanatory angles to pursue in explaining the variations in these relationships. The next section begins to explore one such explanatory factor, doing so under a wider scope of analysis at the state level. 
+
+
+
+### Research Question 3: What is the Relationship Between School COVID Case Rates and Surrounding Political Leanings?
+
+
+The COVID-19 pandemic has revealed more structural problems, systemic injustices, and widespread inequality more so than any major event in recent memory. In the United States, the pandemic has also been greatly politicized, with pandemic precautions becoming emblematic of the liberal Democratic party, and general disbelief and the rejection of precautions becoming hallmarks of the conservative Republican party. Due to these disparate responses to the pandemic, in this section of our study we hypothesize that Republican-voting states will show greater degrees of COVID infection. Our main variable of interest, however, is case levels within colleges and universities. These institutions are unique in that they are self-sustaining and encapsulating, often sharing beliefs in stark contrast to their surrounding communities. They are also generally liberal communities. In the following three visualizations, we offer a primary analysis of whether colleges and universities were sheltered from the impacts of COVID due to their isolated nature, including—should republican states be shown to have higher levels of infection—the effects of surrounding political ideologies.   
+
+
+
+
+
+
+#### Visualization 1: 
+
+```{r}
+
+Viz2 <- CompleteSet%>%
+  group_by(state)%>%
+  summarize(StateCasesPer100 = mean(StateCasesPer100))%>%
+  left_join(PoliticalStatus, by=c("state"="state_name"))%>%
+  arrange(desc(StateCasesPer100))%>%
+  head(10)%>%
+  rename("2020 State Presidential Winner"="Vote")
+
+Viz2[Viz2 == "Red"] <- "Republican"
+Viz2[Viz2 == "Blue"] <- "Democratic"
+
+ggplot(Viz2,aes(x=reorder(state,+StateCasesPer100),y=StateCasesPer100, fill=`2020 State Presidential Winner`))+
+  geom_col(stat = "identity")+
+  scale_fill_manual("2020 State Presidential Winner", values=c('Blue', 'Red'))+
+  labs(x='State', y='COVID Cases per 100 People',title='COVID Cases per 100 People - Top Ten States') +
+  theme(plot.title = element_text(hjust=0.5, size=10, face='bold')) 
+
+```
+
+
+This first visualization frames the greater analysis of this research question. Simply, it seeks to understand the relationship between political ideology and number of COVID cases per 100 individuals. This plot shows that of the ten states with the most COVID cases per 100 residents, 80% voted for the republican candidate in the 2020 United States Presidential Election. Given that this is population-adjusted data, this suggests a strong association between political ideology and COVID prevalence. Because college and university communities are overwhelmingly liberal regardless of surrounding political ideologies, we expect colleges to exhibit similar behaviors and case numbers as liberal states.  
+
+
+
+#### Visualization 2: 
+
+```{r}
+Viz1 <- CompleteSet %>%
+  select(state,StateCasesPer100, SchoolCasesPer100, State2020Vote)%>%
+  group_by(state)%>%
+  summarize(StateCasesPer100 = mean(StateCasesPer100), AverageSchoolCasesPer100 = mean(SchoolCasesPer100))%>%
+  inner_join(CasesandPolitics)%>%
+  select(-TotalCases)%>%
+  select(-total.population)%>%
+  select(-CasesPer100)%>%
+  group_by(Vote)%>%
+  summarise(PoliticalStateCasesPer100 = mean(StateCasesPer100), PoliticalAverageSchoolCasesPer100 = mean(AverageSchoolCasesPer100))
+
+
+
+
+```
+
+```{r}
+
+Viz1final <- read_csv("Viz1Final.csv")
+
+```
+
+```{r}
+  
+
+ggplot(Viz1final, aes(fill=`2020 State Presidential Winner`, y=CasesPer100, x=StatType))+
+  geom_bar(position='dodge', stat='identity')+
+  labs(x='Analysis Level', y='COVID Cases per 100 People',title='COVID Cases per 100 People, College & State Levels') +
+  theme(plot.title = element_text(hjust=0.5, size=10, face='bold')) +
+  scale_fill_manual("2020 State Presidential Winner", values=c('Blue', 'Red')) 
+  
+
+
+```
+
+
+
+Visualization 2 builds upon the finding that republican-voting states more frequently have high COVID rates, including cases within colleges and universities. Overall, this graph shows that while case rates are on average lower within college and university communities than in their greater statewide populations, the political association holds, with colleges and universities communities in republican-voting states having considerably higher cases per 100 students than their liberal counterparts. 
+
+
+#### Visualization 3: 
+
+```{r}
+
+ToJoin3 <- CompleteSet%>%
+  mutate(SchoolSize = case_when(
+      Enrollment > 1 & Enrollment < 5000 ~ "Small (<5,000 Students)",
+      Enrollment >= 5001 & Enrollment < 15000 ~ "Medium (5,001-15,000 Students)",
+      Enrollment >= 15001 ~ "Large (15,000> Students)"))%>%
+  group_by(SchoolSize, State2020Vote)%>%
+  summarise(AverageCasesPer100Students = mean(SchoolCasesPer100))
+```
+
+```{r}
+
+Viz3 <- CompleteSet %>%
+  select(college, State2020Vote, Enrollment, SchoolCasesPer100)%>%
+  mutate(SchoolSize = case_when(
+      Enrollment > 1 & Enrollment < 5000 ~ "Small (<5,000 Students)",
+      Enrollment >= 5001 & Enrollment < 15000 ~ "Medium (5,001-15,000 Students)",
+      Enrollment >= 15001 ~ "Large (15,000> Students)"))%>%
+  left_join(ToJoin3)%>%
+  rename("2020 State Presidential Winner" = "State2020Vote")
+
+  
+```
+
+```{r}
+ ggplot(Viz3, aes(fill=`2020 State Presidential Winner`, y=AverageCasesPer100Students, x=reorder(SchoolSize,+Enrollment)))+
+  geom_bar(position='dodge', stat='identity')+
+  labs(x='School Enrollment', y='Average COVID Cases per 100 Students',title='COVID Cases per 100 Students, by School Enrollment and State Political Leaning') +
+  theme(axis.text.x = element_text(angle = 7))+
+  theme(plot.title = element_text(hjust=0.5, size=9, face='bold')) +
+  scale_fill_manual("2020 State Presidential Winner", values=c('Blue', 'Red')) 
+
+
+
+```
+
+
+
+Visualization 3 examines the finding that in-school cases are in fact influenced by surrounding political ideology at a new, greater level of detail by separating schools by enrollment. This was done to eliminate the possibility of school size being a confounding variable, but also to further test the association found in the previous two visualizations. It holds here, with schools of all sizes in republican-voting states suffering higher case rates than similarly-sized institutions in liberal states. Interestingly, small schools experienced the most cases per 100 students by a large margin. Also, medium and large sized schools in liberal states had nearly identical case rates, whereas a decent gap exists between these categories in conservative states. Finally, this graph shows that medium sized schools had the lowest case numbers in general.
+
+Together, these three visualizations lend great plausibility to the hypothesis that Conservative states have higher case rates, but reveals that college and university communities, as sheltered and generally liberal as they may be, are  effected by this. 
+
+## P5: Next Steps
+
+Our next steps are to learn from the work that we have already done in order to clarify the specific visualizations we would like to produce for each research question. For some questions, we might produce more exploratory visualizations to see if there are any interesting conclusions to make. We also hope to take some of our current visualizations and refine them to be more readable and accurate in order for them to be ready for the final presentation. For example, the map visualization could maybe be improved by adjusting the color scale and playing around with what variables are conveyed through certain aesthetics in order to tell a cohesive story. Our visualization that shows differences in case rates between colleges and their counties could also be improved by looking into the different factors that might influence those differences— like county political leaning. There are also some aspects of our datasets that we would like to explore more. The College Scorecard data has information about school demographics and religious affiliation that could be interesting to look at, as well as a wealth of other variables that we could look into. Overall, our next steps involve doing some more exploratory work so that we can further narrow down the specific questions we want to answer and create the visualizations that help to answer them. 
+
+## P6: Contributions
+
+Ethan: Made all visualizations for research question 3, and wrote graph descriptions and framing text. Wrote graph description for visualization #4 in research question 1. Found political data, and wrote respective dataset description. Compiled individual RMD files for final submission.
+
+Andie: Made the first 3 visualizations and the map for research question 1 (and wrote the descriptions for those graphs), wrote the background information about the IPEDS and College Scorecard datasets, drafted the workflow section and helped with the next steps section. 
+
+Aidan: Made visualizations #2 and #3 for research question two along with the graph descriptions, and found the data set with cdc covid cases. Wrote the description for the College Covid Cases, and the General Covid Data. 
+
+Jojo: Made Visualization 4 in Research Question 1, found the college sizes dataset, and the IPEDS dataset.
+
+Trung: Made visualizations #1 and #4 for research question 2 and  the graph descriptions, as well as found the data set with the county size and county number of Covid cases. Wrote the background information for County size and County number.
+
+
